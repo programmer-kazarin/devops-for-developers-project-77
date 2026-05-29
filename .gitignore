@@ -1,0 +1,5 @@
+secret.*
+.terraform
+*.backup
+terraform.tfstate
+terraform.tfstate.*
