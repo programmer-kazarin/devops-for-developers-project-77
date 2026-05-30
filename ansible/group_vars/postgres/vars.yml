@@ -1,0 +1,3 @@
+postgres_port: 5432
+postgres_user: admin
+postgres_db: hexletdb

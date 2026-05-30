@@ -1,0 +1,22 @@
+- name: Setup all servers
+  hosts: all
+  become: true
+
+  pre_tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install packages for Ansible and Docker roles
+      ansible.builtin.apt:
+        name:
+          - python3-pip
+          - ca-certificates
+          - curl
+          - gnupg
+        state: present
+
+  roles:
+    - geerlingguy.pip
+    - geerlingguy.docker

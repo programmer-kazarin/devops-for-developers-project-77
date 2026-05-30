@@ -1,0 +1,9 @@
+roles:
+  - name: geerlingguy.pip
+    src: geerlingguy.pip
+  - name: geerlingguy.docker
+    src: geerlingguy.docker
+    version: "7.4.6"
+
+collections:
+  - name: community.docker

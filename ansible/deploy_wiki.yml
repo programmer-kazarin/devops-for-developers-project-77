@@ -1,0 +1,32 @@
+- name: Deploy Wiki.js application
+  hosts: webservers
+  become: true
+  tags: [deploy]
+
+  vars_files:
+    - secrets/vault.yml
+    - group_vars/webservers/vars.yml
+
+  tasks:
+    - name: Wait for PostgreSQL
+      wait_for:
+        host: "{{ postgres_host }}"
+        port: "{{ postgres_port }}"
+        timeout: 120
+
+    - name: Run Wiki.js container
+      docker_container:
+        name: "{{ wiki_container_name }}"
+        image: "{{ wiki_image }}"
+        state: started
+        restart_policy: always
+        pull: true
+        ports:
+          - "{{ wiki_port }}:3000"
+        env:
+          DB_TYPE: postgres
+          DB_HOST: "{{ postgres_host | string }}"
+          DB_PORT: "{{ postgres_port | string }}"
+          DB_USER: "{{ postgres_user | string }}"
+          DB_PASS: "{{ postgres_password | string }}"
+          DB_NAME: "{{ postgres_db | string }}"

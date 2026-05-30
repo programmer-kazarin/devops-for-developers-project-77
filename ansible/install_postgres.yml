@@ -1,0 +1,49 @@
+- name: Install Docker and run PostgreSQL container
+  hosts: postgres
+  become: true
+
+  vars_files:
+    - secrets/vault.yml
+    - group_vars/webservers/vars.yml
+
+  vars:
+    postgres_data_dir: /opt/postgres/data
+
+  tasks:
+    - name: Remove legacy Docker apt source
+      file:
+        path: /etc/apt/sources.list.d/docker.list
+        state: absent
+
+    - name: Ensure Docker service is running
+      systemd:
+        name: docker
+        enabled: true
+        state: started
+
+    - name: Install python3-docker
+      apt:
+        name: python3-docker
+        state: present
+        update_cache: true
+
+    - name: Create PostgreSQL data directory
+      file:
+        path: "{{ postgres_data_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Run PostgreSQL container
+      docker_container:
+        name: postgres
+        image: postgres:16
+        state: started
+        restart_policy: always
+        env:
+          POSTGRES_USER: "{{ postgres_user | string }}"
+          POSTGRES_PASSWORD: "{{ postgres_password | string }}"
+          POSTGRES_DB: "{{ postgres_db | string }}"
+        ports:
+          - "{{ postgres_port }}:5432"
+        volumes:
+          - "{{ postgres_data_dir }}:/var/lib/postgresql/data"

@@ -1,0 +1,7 @@
+pip_install_packages:
+  - name: docker
+
+wiki_image: ghcr.io/requarks/wiki:2
+wiki_container_name: wiki
+wiki_port: 3000
+http_port: 80

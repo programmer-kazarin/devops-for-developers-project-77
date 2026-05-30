@@ -1,0 +1,4 @@
+postgres_host: "{{ hostvars[groups['postgres'][0]]['ansible_host'] }}"
+postgres_port: "{{ hostvars[groups['postgres'][0]]['postgres_port'] }}"
+postgres_user: "{{ hostvars[groups['postgres'][0]]['postgres_user'] }}"
+postgres_db: "{{ hostvars[groups['postgres'][0]]['postgres_db'] }}"

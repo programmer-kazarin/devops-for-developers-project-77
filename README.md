@@ -3,65 +3,150 @@
 
 # Проект: Инфраструктура как код
 
-Локальный стенд на libvirt/KVM: Terraform в `terraform/`, конфигурация в `provider.tf` и `backend.tf`.
+## Краткое описание проекта
+
+Лабораторный стенд из четырёх ВМ (KVM/libvirt, Terraform) с развёртыванием приложений через Ansible.
+
+**Стек:** [Wiki.js](https://js.wiki/) (Docker), PostgreSQL 16 (Docker), [Caddy](https://caddyserver.com/) (Docker).
+
+```
+Клиент → Caddy :80 (balancer) → Wiki.js :3000 (webservers) → PostgreSQL (postgres)
+```
+
+| VM       | IP             | Ansible (inventory) | SSH                 |
+|----------|----------------|---------------------|---------------------|
+| balancer | 192.168.100.10 | balancer01          | `make ssh_balanser` |
+| server1  | 192.168.100.11 | server1             | `make ssh_server1`  |
+| server2  | 192.168.100.12 | server2             | `make ssh_server2`  |
+| db       | 192.168.100.13 | postgres01          | `make ssh_postgres` |
+
+Пользователь `student`: первый вход по паролю (`student`, `terraform/variables.tf`), для Ansible — ключ через `ssh-copy-id`.
+
+**Структура репозитория:**
+
+```
+├── Makefile              # SSH + делегирование в подкаталоги
+├── terraform/            # provider.tf, backend.tf, Makefile
+└── ansible/
+    ├── Makefile
+    ├── inventory.ini
+    ├── playbook.yml
+    ├── install_postgres.yml
+    ├── deploy_wiki.yml
+    ├── install_caddy.yml
+    ├── group_vars/
+    ├── secrets/vault.yml
+    └── templates/Caddyfile.j2
+```
 
 ## Системные требования
 
-- **ОС:** Ubuntu 22.04 / 24.04 (или другой дистрибутив с KVM и libvirt)
-- **CPU:** аппаратная виртуализация (Intel VT-x / AMD-V), проверка: `egrep -c '(vmx|svm)' /proc/cpuinfo` → не `0`
-- **RAM:** от 8 GiB на хосте (4 ВМ: 512 MiB + 1 GiB + 1 GiB + 2 GiB + запас под ОС)
-- **Диск:** от 15 GiB свободно (4 cloud-образа ~700 MiB каждый + cloud-init ISO)
-- **ПО:** [Terraform](https://developer.hashicorp.com/terraform/install) ≥ 1.0, SSH-ключ `~/.ssh/id_ed25519` (+ `.pub` для cloud-init)
-- **Пакеты (Ubuntu/Debian):**
+- **ОС:** Ubuntu 22.04 / 24.04, KVM/libvirt
+- **CPU:** `egrep -c '(vmx|svm)' /proc/cpuinfo` → не `0`
+- **RAM:** от 8 GiB
+- **Диск:** от 15 GiB свободно на хосте
+- **ПО:** Terraform ≥ 1.0, Ansible ≥ 2.14, SSH-ключ `~/.ssh/id_ed25519`
 
 ```bash
-sudo apt install -y qemu-kvm libvirt-daemon-system virtinst genisoimage
+sudo apt install -y qemu-kvm libvirt-daemon-system virtinst genisoimage ansible
+ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519   # если ключа ещё нет
+ansible-vault --version
 ```
 
-`genisoimage` нужен провайдеру libvirt для сборки cloud-init ISO (`mkisofs`).
+## Создание инфраструктуры (terraform + ansible)
 
-## Первичная настройка (один раз)
+### Terraform
 
-Установите пакеты из раздела выше, затем:
+Один раз настройте хост (libvirt, группа `libvirt`, `terraform init`):
 
 ```bash
-make setup
+make setup-host
 ```
 
-`make setup` настраивает libvirt (`qemu.conf`), добавляет пользователя в группу `libvirt` и выполняет `terraform init`.
-
-Перелогиньтесь или выполните `newgrp libvirt`, чтобы группа libvirt применилась.
-
-## Terraform
+Перелогиньтесь или выполните `newgrp libvirt`.
 
 ```bash
 make plan
 make apply
-make destroy   # удалить весь стенд (ВМ, сеть, диски)
 ```
 
-Первый `apply` скачивает cloud-образ для каждой ВМ (~700 MiB × 4), это займёт время.
+Первый `apply` скачивает cloud-образ один раз (~700 MiB), диски ВМ — COW по 12 GiB (`terraform/provider.tf`). Нужен `make setup-host` (права libvirt на qcow2).
+
+Цели: `terraform/Makefile` или из корня (`make plan`, `make apply`, `make destroy`).
+
+### Ansible (подготовка хостов)
+
+После `apply` дождитесь загрузки ВМ (1–2 мин), затем:
+
+```bash
+make install          # Ansible Galaxy (один раз)
+make ssh-known-hosts  # опционально: fingerprint в ~/.ssh/known_hosts
+make ssh-copy-id      # скопировать ~/.ssh/id_ed25519.pub на все ВМ (пароль student × 4)
+make ansible-ping     # pong на всех четырёх хостах
+make prepare          # python3-pip + Docker на всех ВМ
+```
+
+При ошибке `No space left on device` на старых ВМ: `make vm-resize-disks` или пересоздайте стенд (`make destroy` → `make apply`).
+
+## Секреты
+
+Пароль PostgreSQL хранится в `ansible/secrets/vault.yml` (ansible-vault).
+
+```bash
+make vault_edit      # создать / изменить
+make vault_view      # просмотр
+```
+
+Пример **до** шифрования (`ansible/secrets/vault.yml.example`):
+
+```yaml
+---
+postgres_password: my_strong_secret_123
+```
+
+## Деплой (ansible)
+
+```bash
+make deploy_postgres   # спросит пароль vault
+make deploy_wiki
+make deploy_caddy
+```
+
+| Цель | Playbook |
+|------|----------|
+| `make install` / `make setup` | `requirements.yml` |
+| `make prepare` | `playbook.yml` |
+| `make deploy_postgres` | `install_postgres.yml` |
+| `make deploy_wiki` | `deploy_wiki.yml` |
+| `make deploy_caddy` | `install_caddy.yml` |
+| `make test` | syntax-check плейбуков (локально) |
+
+Цели Ansible: `ansible/Makefile` или из корня.
+
+### Проверка
+
+```bash
+curl http://192.168.100.10
+```
+
+В браузере откройте `http://192.168.100.10` — должна открыться Wiki.js через Caddy.
 
 ## Управление ВМ
 
 ```bash
-make vms-list    # список ВМ (qemu:///system)
-make vms-stop    # остановить все (shutdown, иначе destroy)
-make vms-start   # запустить остановленные
+make vms-list     # список ВМ (virsh, qemu:///system)
+make vms-stop     # остановить все (shutdown, иначе destroy)
+make vms-start    # запустить остановленные
+make destroy      # удалить стенд (ВМ, сеть, диски через Terraform)
 ```
 
-`make destroy` удаляет инфраструктуру через Terraform (не только выключение).  
-`make vms-stop` / `make vms-start` — только питание; диски и конфигурация остаются.
+`make vms-stop` / `make vms-start` — только питание; конфигурация и диски сохраняются.
 
-## Виртуальные машины
+При ошибке destroy `Directory not empty`:
 
-| VM       | IP             | SSH              |
-|----------|----------------|------------------|
-| balancer | 192.168.100.10 | `make ssh-balancer` |
-| server1  | 192.168.100.11 | `make ssh-server1`  |
-| server2  | 192.168.100.12 | `make ssh-server2`  |
-| db       | 192.168.100.13 | `make ssh-db`         |
-
-Пользователь `student`, вход по ключу `~/.ssh/id_ed25519` (публичный ключ задаётся в `terraform/provider.tf`).
-
-Для Ansible: `ansible_user=student`, тот же приватный ключ.
+```bash
+make clean-lab-images
+make destroy
+# или
+make destroy-force
+```

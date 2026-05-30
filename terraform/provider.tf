@@ -12,10 +12,11 @@ provider "libvirt" {
 }
 
 locals {
-  vm_user      = "student"
-  ssh_key      = trimspace(file(pathexpand("~/.ssh/id_ed25519.pub")))
-  gateway      = "192.168.100.1"
+  vm_user = "student"
+  gateway = "192.168.100.1"
   ubuntu_image = "https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img"
+  # Образ cloud ~2.2 GiB — без увеличения корень заполняется при apt/docker
+  vm_disk_bytes = 12 * 1024 * 1024 * 1024
 
   vms = {
     balancer = { memory = 512, vcpu = 1, ip = "192.168.100.10", mac = "52:54:00:10:00:0a" }
@@ -25,12 +26,13 @@ locals {
   }
 }
 
-resource "libvirt_pool" "default" {
-  name = "default"
+# Отдельный pool, чтобы destroy не конфликтовал с системным default и чужими файлами в images/
+resource "libvirt_pool" "lab" {
+  name = "devops-lab"
   type = "dir"
 
   target {
-    path = "/var/lib/libvirt/images"
+    path = "/var/lib/libvirt/images/devops-lab"
   }
 }
 
@@ -48,35 +50,48 @@ resource "libvirt_network" "lab" {
   }
 }
 
-# Полный образ с URL на каждую ВМ (~700 MiB), без COW-цепочки
+# libvirt 0.8: size и source вместе нельзя — базовый образ + COW-тома 12 GiB
+resource "libvirt_volume" "ubuntu_base" {
+  name   = "devops-lab-ubuntu-base.qcow2"
+  pool   = libvirt_pool.lab.name
+  source = local.ubuntu_image
+  format = "qcow2"
+}
+
 resource "libvirt_volume" "vm_disk" {
   for_each = local.vms
 
-  name   = "devops-lab-${each.key}.qcow2"
-  pool   = libvirt_pool.default.name
-  source = local.ubuntu_image
-  format = "qcow2"
+  name           = "devops-lab-${each.key}.qcow2"
+  pool           = libvirt_pool.lab.name
+  format         = "qcow2"
+  size           = local.vm_disk_bytes
+  base_volume_id = libvirt_volume.ubuntu_base.id
 }
 
 resource "libvirt_cloudinit_disk" "vm_init" {
   for_each = local.vms
 
   name = "devops-lab-${each.key}-cloudinit.iso"
-  pool = libvirt_pool.default.name
+  pool = libvirt_pool.lab.name
 
   meta_data = "instance-id: ${each.key}\nlocal-hostname: ${each.key}\n"
 
   user_data = <<-EOF
     #cloud-config
     hostname: ${each.key}
-    ssh_pwauth: false
+    growpart:
+      mode: auto
+      devices: ['/']
+    ssh_pwauth: true
+    chpasswd:
+      list: |
+        ${local.vm_user}:${var.vm_password}
+      expire: false
     users:
       - name: ${local.vm_user}
         sudo: ALL=(ALL) NOPASSWD:ALL
         shell: /bin/bash
-        lock_passwd: true
-        ssh_authorized_keys:
-          - ${local.ssh_key}
+        lock_passwd: false
   EOF
 
   network_config = <<-EOF

@@ -1,5 +1,17 @@
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.vault_pass
+.vault_password
+*.retry
+.DS_Store
+*.swp
+*~
 secret.*
 .terraform
 *.backup
 terraform.tfstate
 terraform.tfstate.*
+.ansible/

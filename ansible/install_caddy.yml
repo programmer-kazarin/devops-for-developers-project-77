@@ -1,0 +1,44 @@
+- name: Install and run Caddy as load balancer
+  hosts: balancer
+  become: true
+
+  tasks:
+    - name: Install python3-docker
+      apt:
+        name: python3-docker
+        state: present
+
+    - name: Create Caddy directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - /opt/caddy
+        - /opt/caddy/data
+
+    - name: Deploy Caddyfile
+      template:
+        src: templates/Caddyfile.j2
+        dest: /opt/caddy/Caddyfile
+        mode: "0644"
+      notify: Restart Caddy container
+
+    - name: Run Caddy container
+      docker_container:
+        name: caddy
+        image: caddy:latest
+        state: started
+        restart_policy: always
+        ports:
+          - "{{ http_port }}:80"
+        volumes:
+          - /opt/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+          - /opt/caddy/data:/data
+
+  handlers:
+    - name: Restart Caddy container
+      docker_container:
+        name: caddy
+        state: started
+        restart: true

@@ -1,56 +1,32 @@
-SSH_USER ?= student
-SSH_KEY  ?= $(HOME)/.ssh/id_ed25519
-SSH_OPTS ?= -o StrictHostKeyChecking=accept-new -i $(SSH_KEY)
-TF_DIR     := terraform
-VIRSH      := virsh -c qemu:///system
-VM_NAMES   := balancer server1 server2 db
-VM_PREFIX  := devops-lab
+# Корневой Makefile: SSH и делегирование в terraform/ и ansible/
+# Из корня: make apply | make prepare
+# Напрямую: make -C terraform plan | make -C ansible install
 
-.PHONY: setup plan apply destroy vms-list vms-stop vms-start \
-	ssh-balancer ssh-server1 ssh-server2 ssh-db
+TF_DIR      := terraform
+ANSIBLE_DIR := ansible
 
-setup:
-	cd $(TF_DIR) && terraform init
-	@grep -q '^dynamic_ownership' /etc/libvirt/qemu.conf 2>/dev/null || \
-		echo 'dynamic_ownership = 1' | sudo tee -a /etc/libvirt/qemu.conf
-	@sudo sed -i 's/^#\?dynamic_ownership.*/dynamic_ownership = 1/' /etc/libvirt/qemu.conf
-	@grep -q '^security_driver' /etc/libvirt/qemu.conf 2>/dev/null || \
-		echo 'security_driver = "none"' | sudo tee -a /etc/libvirt/qemu.conf
-	@sudo sed -i 's/^#\?security_driver.*/security_driver = "none"/' /etc/libvirt/qemu.conf
-	sudo systemctl restart libvirtd
-	sudo usermod -aG libvirt $(USER)
+TF_TARGETS := init plan apply destroy setup-host fmt validate \
+	vms-list vms-stop vms-start clean-lab-images destroy-force vm-resize-disks
 
-plan:
-	cd $(TF_DIR) && terraform plan
+ANSIBLE_TARGETS := install setup test prepare deploy_postgres deploy_wiki deploy_caddy \
+	vault_edit vault_view ansible-ping ssh-known-hosts ssh-copy-id
 
-apply:
-	cd $(TF_DIR) && terraform apply
+.PHONY: $(TF_TARGETS) $(ANSIBLE_TARGETS) ssh_server1 ssh_server2 ssh_balanser ssh_postgres
 
-destroy:
-	cd $(TF_DIR) && terraform destroy
+$(TF_TARGETS):
+	$(MAKE) -C $(TF_DIR) $@
 
-vms-list:
-	$(VIRSH) list --all
+$(ANSIBLE_TARGETS):
+	$(MAKE) -C $(ANSIBLE_DIR) $@
 
-vms-stop:
-	@for vm in $(VM_NAMES); do \
-		$(VIRSH) shutdown $(VM_PREFIX)-$$vm 2>/dev/null || \
-		$(VIRSH) destroy $(VM_PREFIX)-$$vm 2>/dev/null || true; \
-	done
+ssh_server1:
+	ssh student@192.168.100.11
 
-vms-start:
-	@for vm in $(VM_NAMES); do \
-		$(VIRSH) start $(VM_PREFIX)-$$vm 2>/dev/null || true; \
-	done
+ssh_server2:
+	ssh student@192.168.100.12
 
-ssh-balancer:
-	ssh $(SSH_OPTS) $(SSH_USER)@192.168.100.10
+ssh_balanser:
+	ssh student@192.168.100.10
 
-ssh-server1:
-	ssh $(SSH_OPTS) $(SSH_USER)@192.168.100.11
-
-ssh-server2:
-	ssh $(SSH_OPTS) $(SSH_USER)@192.168.100.12
-
-ssh-db:
-	ssh $(SSH_OPTS) $(SSH_USER)@192.168.100.13
+ssh_postgres:
+	ssh student@192.168.100.13
