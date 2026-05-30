@@ -16,3 +16,7 @@ terraform.tfstate
 terraform.tfstate.*
 terraform.tfvars
 .ansible/
+
+# Генерируется Terraform (terraform/ansible.tf)
+ansible/inventory.ini
+ansible/group_vars/terraform.yml

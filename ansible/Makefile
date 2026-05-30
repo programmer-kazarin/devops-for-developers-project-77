@@ -1,7 +1,10 @@
 export ANSIBLE_CONFIG := $(abspath ansible.cfg)
 
 .PHONY: install setup test prepare deploy_postgres deploy_wiki deploy_caddy deploy_datadog \
-	vault_edit vault_view ansible-ping ssh-known-hosts ssh-copy-id
+	vault_edit vault_view ansible-ping ssh-known-hosts ssh-copy-id inventory-example
+
+inventory-example:
+	cp inventory.ini.example inventory.ini
 
 install:
 	ansible-galaxy install -r requirements.yml

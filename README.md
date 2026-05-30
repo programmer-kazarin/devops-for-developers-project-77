@@ -13,6 +13,8 @@
 Клиент → https://wiki.local (Caddy :443, balancer) → Wiki.js :3000 (webservers) → PostgreSQL (postgres)
 ```
 
+Локальный доступ: добавьте в `/etc/hosts` строку `192.168.100.10 wiki.local`, затем откройте https://wiki.local в браузере.
+
 | VM       | IP             | Ansible (inventory) | SSH                 |
 |----------|----------------|---------------------|---------------------|
 | balancer | 192.168.100.10 | balancer01          | `make ssh_balanser` |
@@ -25,18 +27,18 @@
 **Структура репозитория:**
 
 ```
-├── Makefile              # SSH + делегирование в подкаталоги
-├── terraform/            # provider.tf, backend.tf, Makefile
+├── Makefile
+├── terraform/              # инфраструктура libvirt + DataDog monitor
+│   ├── provider.tf
+│   ├── ansible.tf          # генерация inventory и group_vars для Ansible
+│   └── templates/
 └── ansible/
-    ├── Makefile
-    ├── inventory.ini
-    ├── playbook.yml
-    ├── install_postgres.yml
-    ├── deploy_wiki.yml
-    ├── install_caddy.yml
-    ├── group_vars/
-    ├── secrets/vault.yml
-    └── templates/Caddyfile.j2
+    ├── playbook.yml        # главный плейбук
+    ├── inventory.ini       # генерируется Terraform (не в git)
+    ├── inventory.ini.example
+    ├── group_vars/terraform.yml   # генерируется Terraform
+    ├── secrets/vault.yml          # ansible-vault
+    └── …
 ```
 
 ## Системные требования
@@ -51,54 +53,21 @@
 sudo apt install -y qemu-kvm libvirt-daemon-system virtinst genisoimage ansible
 ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519   # если ключа ещё нет
 ansible-vault --version
+python3 -m venv venv && source venv/bin/activate   # опционально
 ```
 
-## Создание инфраструктуры (terraform + ansible)
+## Предварительная настройка
 
-### Terraform
+| Что | Где | Команда / файл |
+|-----|-----|----------------|
+| Libvirt + Terraform init | хост | `make setup-host`, затем `newgrp libvirt` |
+| VPN для Terraform registry | хост | при ошибке *Content not available in your region* |
+| Секреты Ansible | vault | `make vault_edit` → `postgres_password`, `vault_datadog_api_key` |
+| Ключи DataDog для Terraform | файл | `cp terraform/terraform.tfvars.example terraform/terraform.tfvars` |
+| SSH-ключи на ВМ | — | `make ssh-copy-id` (пароль `student`) |
+| Локальный DNS | `/etc/hosts` | `192.168.100.10 wiki.local` |
 
-Один раз настройте хост (libvirt, группа `libvirt`, `terraform init`):
-
-```bash
-make setup-host
-```
-
-Перелогиньтесь или выполните `newgrp libvirt`.
-
-```bash
-make init-upgrade   # один раз после клонирования или добавления провайдера DataDog
-make plan
-make apply
-```
-
-Если `terraform init` пишет **Invalid provider registry host** / *Content not available in your region* — включите **VPN** (реестр HashiCorp `registry.terraform.io` недоступен без него в ряде регионов).
-
-Первый `apply` скачивает cloud-образ один раз (~700 MiB), диски ВМ — COW по 12 GiB (`terraform/provider.tf`). Нужен `make setup-host` (права libvirt на qcow2).
-
-### Ansible (подготовка хостов)
-
-После `apply` дождитесь загрузки ВМ (1–2 мин), затем:
-
-```bash
-make install          # Ansible Galaxy (один раз)
-make ssh-known-hosts  # опционально: fingerprint в ~/.ssh/known_hosts
-make ssh-copy-id      # скопировать ~/.ssh/id_ed25519.pub на все ВМ (пароль student × 4)
-make ansible-ping     # pong на всех четырёх хостах
-make prepare          # python3-pip + Docker на всех ВМ
-```
-
-При ошибке `No space left on device` на старых ВМ: `make vm-resize-disks` или пересоздайте стенд (`make destroy` → `make apply`).
-
-## Секреты
-
-Пароль PostgreSQL хранится в `ansible/secrets/vault.yml` (ansible-vault).
-
-```bash
-make vault_edit      # создать / изменить
-make vault_view      # просмотр
-```
-
-Пример **до** шифрования (`ansible/secrets/vault.yml.example`):
+Пример `ansible/secrets/vault.yml` **до** шифрования (`ansible/secrets/vault.yml.example`):
 
 ```yaml
 ---
@@ -106,69 +75,107 @@ postgres_password: "my_strong_secret_123"
 vault_datadog_api_key: "YOUR_DATADOG_API_KEY"
 ```
 
-Ключ DataDog для агента — в разделе [Мониторинг DataDog](#мониторинг-datadog). Для Terraform — ещё Application Key в `terraform/terraform.tfvars`.
+Пример `terraform/terraform.tfvars` (не коммитить, см. `terraform.tfvars.example`):
+
+```hcl
+datadog_api_key = "..."
+datadog_app_key = "..."
+```
+
+## Полный деплой (порядок команд)
+
+```bash
+# 1. Инфраструктура
+make setup-host
+make init-upgrade          # провайдеры libvirt, local, datadog
+make apply                 # ВМ + ansible/inventory.ini + group_vars/terraform.yml
+
+# 2. Ansible
+make install
+make ssh-copy-id
+make ansible-ping
+make prepare
+
+# 3. Приложение
+make deploy_postgres       # vault password
+make deploy_wiki
+make deploy_caddy
+
+# 4. DataDog
+make deploy_datadog        # vault password
+make apply-datadog         # монитор в Terraform
+
+# 5. Проверка
+curl -k -I https://wiki.local
+make test                  # syntax-check / CI
+```
+
+До `make apply` можно подставить пример inventory: `make inventory-example`.
+
+## Создание инфраструктуры (terraform + ansible)
+
+### Terraform
+
+`make apply` создаёт ВМ и **генерирует** для Ansible:
+
+- `ansible/inventory.ini` — из `terraform/templates/inventory.ini.tpl`
+- `ansible/group_vars/terraform.yml` — IP и gateway из `local.vms`
+
+```bash
+make plan
+make apply
+make destroy
+```
+
+Первый `apply` скачивает cloud-образ (~700 MiB). Диски ВМ — COW 12 GiB. Нужен `make setup-host`.
+
+Если `terraform init` пишет **Invalid provider registry host** — включите **VPN**.
+
+### Ansible (подготовка хостов)
+
+```bash
+make install
+make ssh-known-hosts       # опционально
+make ssh-copy-id
+make ansible-ping
+make prepare
+```
+
+## Секреты
+
+```bash
+make vault_edit
+make vault_view
+```
 
 ## Деплой (ansible)
 
 ```bash
-make deploy_postgres   # спросит пароль vault
+make deploy_postgres
 make deploy_wiki
 make deploy_caddy
+make deploy_datadog
 ```
 
 ## Мониторинг DataDog
 
-Сайт аккаунта: **datadoghq.eu**.
+Сайт: **datadoghq.eu**.
 
-Нужны **два разных ключа** из **разных** разделов UI:
-
-| Переменная в проекте | Тип ключа | Где взять в DataDog | Куда записать |
-|----------------------|-----------|---------------------|---------------|
-| `vault_datadog_api_key` | **API Key** | [Organization Settings → API Keys](https://app.datadoghq.eu/organization-settings/api-keys) | `ansible/secrets/vault.yml` (`make vault_edit`) |
-| `datadog_api_key` | **API Key** (тот же) | тот же раздел: [API Keys](https://app.datadoghq.eu/organization-settings/api-keys) | `terraform/terraform.tfvars` |
-| `datadog_app_key` | **Application Key** | [Personal Settings → Application Keys](https://app.datadoghq.eu/personal-settings/application-keys) | `terraform/terraform.tfvars` |
-
-- **API Key** — для агента на ВМ (отправка метрик и HTTP-проверок). Полное значение показывают **один раз** при создании; в списке видны только последние символы (`…86f3`).
-- **Application Key** — для Terraform (создание монитора через API). Тоже копируйте при создании (`kazarin-wiki` и т.п.).
-
-Подготовка файлов:
+| Переменная в проекте | Тип ключа | Где взять | Куда записать |
+|----------------------|-----------|-----------|---------------|
+| `vault_datadog_api_key` | API Key | [API Keys](https://app.datadoghq.eu/organization-settings/api-keys) | `ansible/secrets/vault.yml` |
+| `datadog_api_key` | API Key (тот же) | тот же | `terraform/terraform.tfvars` |
+| `datadog_app_key` | Application Key | [Application Keys](https://app.datadoghq.eu/personal-settings/application-keys) | `terraform/terraform.tfvars` |
 
 ```bash
-make vault_edit
-# vault_datadog_api_key: "<API Key из Organization Settings>"
-
-cp terraform/terraform.tfvars.example terraform/terraform.tfvars
-# datadog_api_key = "<тот же API Key>"
-# datadog_app_key = "<Application Key из Personal Settings>"
-```
-
-### Ansible — агент на webservers
-
-HTTP-проверка Wiki.js: `http://127.0.0.1:3000/` на каждом server. Коллекция [datadog.dd](https://galaxy.ansible.com/ui/repo/published/datadog/dd/).
-
-```bash
-make install
-make deploy_datadog   # после deploy_wiki, спросит пароль vault
-```
-
-Если падает на `Install apt-transport-https` / `Failed to update apt cache` — на ВМ проверьте `ssh student@192.168.100.11` → `sudo apt-get update`. Часто помогает повторный `make deploy_datadog` после pre_tasks (IPv4 для apt).
-
-### Terraform — монитор
-
-Алерт на service check `http.can_connect` (тег `service:wiki`). Ресурс [datadog_monitor](https://registry.terraform.io/providers/DataDog/datadog/latest/docs/resources/monitor), код — `terraform/datadog.tf`.
-
-```bash
-make init-upgrade      # обновит .terraform.lock.hcl (провайдер DataDog)
+make deploy_datadog
+make init-upgrade
 make apply-datadog
 ```
 
-**Ошибка `403 Forbidden` при `apply-datadog`:**
+**Ошибка `403 Forbidden` при `apply-datadog`:** полные ключи (не KEY ID), не перепутать api/app, для EU: `datadog_api_url = "https://api.datadoghq.eu/"`.
 
-1. В `terraform.tfvars` — **полные** ключи (не KEY ID из таблицы). API Key — 32 символа из [API Keys](https://app.datadoghq.eu/organization-settings/api-keys); Application Key — секрет при создании в [Application Keys](https://app.datadoghq.eu/personal-settings/application-keys).
-2. Не перепутайте местами: `datadog_api_key` ≠ `datadog_app_key`.
-3. Сайт **datadoghq.eu** → в `terraform.tfvars` должно быть (или по умолчанию):
-   `datadog_api_url = "https://api.datadoghq.eu/"`.
-4. Проверка ключей (подставьте свои значения):
+Проверка ключей:
 
 ```bash
 export DD_API_KEY='...'
@@ -176,41 +183,38 @@ export DD_APP_KEY='...'
 curl -sS -o /dev/null -w "%{http_code}\n" \
   -H "DD-API-KEY: $DD_API_KEY" -H "DD-APPLICATION-KEY: $DD_APP_KEY" \
   https://api.datadoghq.eu/api/v1/validate
-# ожидается 200
 ```
 
-Если `401`/`403` — пересоздайте Application Key и скопируйте значение сразу.
+В UI: [Hosts](https://app.datadoghq.eu/infrastructure), [Monitors](https://app.datadoghq.eu/monitors/manage).
 
-### Проверка в UI
+## Проверка
 
-- [Infrastructure → Hosts](https://app.datadoghq.eu/infrastructure) — `server1`, `server2` после `deploy_datadog`
-- [Monitors → Manage Monitors](https://app.datadoghq.eu/monitors/manage) — `[Wiki.js] HTTP health check failed`
-
-Монитор можно набросать в UI и **Export → Terraform**, затем сверить с `terraform/datadog.tf`.
-
-### Домен
-Так как проект запускается локально, добавим 
-```192.168.100.10 wiki.local```
-в /etc/hosts
-
-### Проверка
 ```bash
+# /etc/hosts: 192.168.100.10 wiki.local
 curl -k -I https://wiki.local
-# HTTP/2 200
 ```
 
-Браузер: [https://wiki.local](https://wiki.local). Предупреждение о сертификате можно убрать, установив доверие к `/opt/caddy/data/caddy/pki/ca/root.crt` с балансировщика (`make ssh_balanser`).
+## Makefile
+
+| Каталог | Цели |
+|---------|------|
+| **корень** | `apply`, `destroy`, `prepare`, `deploy_*`, `deploy_datadog`, `apply-datadog`, `test`, `ssh_server1`, … |
+| `terraform/` | `init`, `init-upgrade`, `plan`, `apply`, `destroy`, `vms-list`, `vms-stop`, `vms-start`, `plan-datadog`, `apply-datadog`, `clean-lab-images`, `destroy-force` |
+| `ansible/` | `install`, `prepare`, `deploy_*`, `deploy_datadog`, `test`, `vault_edit`, `ansible-ping`, `ssh-copy-id`, `inventory-example` |
+
+| Цель | Назначение |
+|------|------------|
+| `make test` | Проверка синтаксиса плейбуков (локально и в CI) |
+| `make inventory-example` | Скопировать `inventory.ini.example` → `inventory.ini` до `apply` |
 
 ## Управление ВМ
 
 ```bash
-make vms-list     # список ВМ (virsh, qemu:///system)
-make vms-stop     # остановить все (shutdown, иначе destroy)
-make vms-start    # запустить остановленные
-make destroy      # удалить стенд (ВМ, сеть, диски через Terraform)
+make vms-list
+make vms-stop
+make vms-start
+make destroy
 ```
-
-`make vms-stop` / `make vms-start` — только питание; конфигурация и диски сохраняются.
 
 При ошибке destroy `Directory not empty`:
 
