@@ -5,10 +5,10 @@
 TF_DIR      := terraform
 ANSIBLE_DIR := ansible
 
-TF_TARGETS := init plan apply destroy setup-host fmt validate \
+TF_TARGETS := init init-upgrade plan apply destroy setup-host fmt validate plan-datadog apply-datadog \
 	vms-list vms-stop vms-start clean-lab-images destroy-force vm-resize-disks
 
-ANSIBLE_TARGETS := install setup test prepare deploy_postgres deploy_wiki deploy_caddy \
+ANSIBLE_TARGETS := install setup test prepare deploy_postgres deploy_wiki deploy_caddy deploy_datadog \
 	vault_edit vault_view ansible-ping ssh-known-hosts ssh-copy-id
 
 .PHONY: $(TF_TARGETS) $(ANSIBLE_TARGETS) ssh_server1 ssh_server2 ssh_balanser ssh_postgres

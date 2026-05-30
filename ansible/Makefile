@@ -1,6 +1,6 @@
 export ANSIBLE_CONFIG := $(abspath ansible.cfg)
 
-.PHONY: install setup test prepare deploy_postgres deploy_wiki deploy_caddy \
+.PHONY: install setup test prepare deploy_postgres deploy_wiki deploy_caddy deploy_datadog \
 	vault_edit vault_view ansible-ping ssh-known-hosts ssh-copy-id
 
 install:
@@ -17,6 +17,7 @@ else
 	ansible-playbook -i inventory.ini install_caddy.yml --syntax-check
 	ansible-playbook -i inventory.ini install_postgres.yml --syntax-check
 	ansible-playbook -i inventory.ini deploy_wiki.yml --syntax-check
+	ansible-playbook -i inventory.ini install_datadog.yml --syntax-check
 endif
 
 prepare:
@@ -47,6 +48,9 @@ deploy_postgres:
 
 deploy_wiki:
 	ansible-playbook -i inventory.ini deploy_wiki.yml --ask-vault-pass --tags deploy
+
+deploy_datadog:
+	ansible-playbook -i inventory.ini install_datadog.yml --ask-vault-pass
 
 vault_edit:
 	ansible-vault edit secrets/vault.yml

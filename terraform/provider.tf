@@ -4,6 +4,10 @@ terraform {
       source  = "dmacvicar/libvirt"
       version = "~> 0.8.0"
     }
+    datadog = {
+      source  = "DataDog/datadog"
+      version = "~> 3.43"
+    }
   }
 }
 

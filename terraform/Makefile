@@ -4,11 +4,15 @@ VM_DISK_SIZE_GB ?= 12
 VM_NAMES        := balancer server1 server2 db
 VM_PREFIX       := devops-lab
 
-.PHONY: init plan apply destroy setup-host fmt validate \
+.PHONY: init init-upgrade plan apply destroy setup-host fmt validate plan-datadog apply-datadog \
 	vms-list vms-stop vms-start clean-lab-images destroy-force vm-resize-disks
 
 init:
 	terraform init
+
+# После добавления провайдера (DataDog) или смены версий в provider.tf
+init-upgrade:
+	terraform init -upgrade
 
 plan:
 	terraform plan
@@ -34,6 +38,12 @@ fmt:
 
 validate:
 	terraform validate
+
+plan-datadog:
+	terraform plan -target=datadog_monitor.wiki_http
+
+apply-datadog:
+	terraform apply -target=datadog_monitor.wiki_http
 
 vms-list:
 	$(VIRSH) list --all

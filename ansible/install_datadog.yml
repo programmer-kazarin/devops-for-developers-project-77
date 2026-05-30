@@ -1,0 +1,45 @@
+---
+- name: Install and configure Datadog Agent on webservers
+  hosts: webservers
+  become: true
+  serial: 1
+
+  vars_files:
+    - secrets/vault.yml
+
+  pre_tasks:
+    - name: Wait for apt/dpkg lock (unattended-upgrades)
+      ansible.builtin.shell: |
+        set -e
+        for lock in /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/cache/apt/archives/lock; do
+          while fuser "$lock" >/dev/null 2>&1; do
+            sleep 5
+          done
+        done
+      changed_when: false
+      args:
+        executable: /bin/bash
+
+    - name: Prefer IPv4 for apt (частая причина зависания apt update на ВМ)
+      ansible.builtin.copy:
+        dest: /etc/apt/apt.conf.d/99force-ipv4
+        content: 'Acquire::ForceIPv4 "true";'
+        mode: "0644"
+
+    - name: Prepare apt before Datadog role
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 0
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+        state: present
+      register: apt_prepare
+      retries: 3
+      delay: 20
+      until: apt_prepare is succeeded
+
+  roles:
+    - role: datadog.dd.agent

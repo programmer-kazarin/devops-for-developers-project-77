@@ -1,0 +1,21 @@
+datadog_api_key: "{{ vault_datadog_api_key }}"
+datadog_agent_major_version: 7
+datadog_apt_cache_valid_time: 3600
+
+datadog_config:
+  tags:
+    - "env:dev"
+    - "app:wiki"
+
+datadog_checks:
+  http_check:
+    init_config:
+    instances:
+      - name: "Wiki.js on {{ inventory_hostname }}"
+        url: "http://127.0.0.1:{{ wiki_port }}/"
+        timeout: 10
+        method: get
+        http_response_status_code: 200-399
+        tags:
+          - "service:wiki"
+          - "host:{{ inventory_hostname }}"

@@ -1,0 +1,4 @@
+# cp terraform.tfvars.example terraform.tfvars  # не коммитить terraform.tfvars
+datadog_api_key = "YOUR_DATADOG_API_KEY"
+datadog_app_key = "YOUR_DATADOG_APPLICATION_KEY"
+# datadog_api_url = "https://api.datadoghq.com/"  # для US-аккаунта
