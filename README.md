@@ -10,7 +10,7 @@
 **Стек:** [Wiki.js](https://js.wiki/) (Docker), PostgreSQL 16 (Docker), [Caddy](https://caddyserver.com/) (Docker).
 
 ```
-Клиент → Caddy :80 (balancer) → Wiki.js :3000 (webservers) → PostgreSQL (postgres)
+Клиент → https://wiki.local (Caddy :443, balancer) → Wiki.js :3000 (webservers) → PostgreSQL (postgres)
 ```
 
 | VM       | IP             | Ansible (inventory) | SSH                 |
@@ -72,8 +72,6 @@ make apply
 
 Первый `apply` скачивает cloud-образ один раз (~700 MiB), диски ВМ — COW по 12 GiB (`terraform/provider.tf`). Нужен `make setup-host` (права libvirt на qcow2).
 
-Цели: `terraform/Makefile` или из корня (`make plan`, `make apply`, `make destroy`).
-
 ### Ansible (подготовка хостов)
 
 После `apply` дождитесь загрузки ВМ (1–2 мин), затем:
@@ -112,24 +110,18 @@ make deploy_wiki
 make deploy_caddy
 ```
 
-| Цель | Playbook |
-|------|----------|
-| `make install` / `make setup` | `requirements.yml` |
-| `make prepare` | `playbook.yml` |
-| `make deploy_postgres` | `install_postgres.yml` |
-| `make deploy_wiki` | `deploy_wiki.yml` |
-| `make deploy_caddy` | `install_caddy.yml` |
-| `make test` | syntax-check плейбуков (локально) |
-
-Цели Ansible: `ansible/Makefile` или из корня.
+### Домен
+Так как проект запускается локально, добавим 
+```192.168.100.10 wiki.local```
+в /etc/hosts
 
 ### Проверка
-
 ```bash
-curl http://192.168.100.10
+curl -k -I https://wiki.local
+# HTTP/2 200
 ```
 
-В браузере откройте `http://192.168.100.10` — должна открыться Wiki.js через Caddy.
+Браузер: [https://wiki.local](https://wiki.local). Предупреждение о сертификате можно убрать, установив доверие к `/opt/caddy/data/caddy/pki/ca/root.crt` с балансировщика (`make ssh_balanser`).
 
 ## Управление ВМ
 

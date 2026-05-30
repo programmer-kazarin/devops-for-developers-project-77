@@ -1,4 +1,5 @@
-:{{ http_port }} {
+{{ wiki_domain }} {
+    tls internal
     reverse_proxy {
         {% for host in groups['webservers'] %}
         to {{ hostvars[host]['ansible_host'] }}:{{ wiki_port }}
@@ -8,4 +9,8 @@
         health_interval 10s
         health_timeout 5s
     }
+}
+
+:{{ http_port }} {
+    redir https://{{ wiki_domain }}{uri} permanent
 }

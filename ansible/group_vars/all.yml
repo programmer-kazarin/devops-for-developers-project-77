@@ -4,4 +4,6 @@ pip_install_packages:
 wiki_image: ghcr.io/requarks/wiki:2
 wiki_container_name: wiki
 wiki_port: 3000
+wiki_domain: wiki.local
 http_port: 80
+https_port: 443
